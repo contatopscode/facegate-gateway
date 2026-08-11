@@ -1,0 +1,4 @@
+# Deps só pra dev/testes (não vão pro Docker)
+-r requirements.txt
+pytest==8.3.3
+pytest-asyncio==0.24.0
