@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     # --- Terminal ---
     hikvision_host: str = "10.5.50.161"
     hikvision_port: int = 443
+    # Esquema HTTP usado pra falar com o terminal. Muitos terminais Hikvision
+    # (DS-K1T3xx/6xx) atendem ISAPI em http:80 de fábrica, não https:443 — se
+    # o terminal só responde em http, `https` dá erro de conexão. Deixe
+    # `https` como default (fábrica costuma expor os dois) e troque pra `http`
+    # quando o terminal só atende em texto claro. Ver `hikvision_base_url`.
+    hikvision_scheme: str = "https"
     hikvision_user: str = "admin"
     hikvision_password: str = ""
     hikvision_fdid: str = "1"
@@ -33,7 +39,7 @@ class Settings(BaseSettings):
 
     @property
     def hikvision_base_url(self) -> str:
-        return f"https://{self.hikvision_host}:{self.hikvision_port}"
+        return f"{self.hikvision_scheme}://{self.hikvision_host}:{self.hikvision_port}"
 
 
 settings = Settings()
