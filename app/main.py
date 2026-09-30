@@ -66,8 +66,19 @@ async def health() -> dict:
     return {
         "status": "ok",
         "version": "0.1.0",
-        "hikvision_host": settings.hikvision_host,
-        "leitores": sorted(settings.leitores),
+    }
+
+
+# ---------- Diagnóstico (com token) ----------
+
+
+@app.get("/leitores", dependencies=[Depends(require_token)])
+async def listar_leitores() -> dict:
+    """Terminais configurados (sem senha). Fica atrás do token: pelo túnel,
+    o `/health` é público e não pode expor IPs nem nomes da LAN."""
+    return {
+        "padrao": settings.hikvision_host,
+        "leitores": {nome: c.host for nome, c in sorted(settings.leitores.items())},
     }
 
 

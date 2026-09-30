@@ -72,8 +72,22 @@ def test_cadastro_no_leitor_usa_as_credenciais_dele(
     assert vistos == [("https://10.5.50.161:443", "abc-123")]
 
 
-def test_health_lista_os_leitores(client, dois_leitores):
-    assert client.get("/health").json()["leitores"] == ["bancada", "lavanderia"]
+def test_health_nao_expoe_leitores_nem_ips(client, dois_leitores):
+    """O /health é público pelo túnel: nada de nome nem IP da LAN."""
+    body = client.get("/health").json()
+    assert set(body) == {"status", "version"}
+
+
+def test_listar_leitores_so_com_token(client, auth_header, dois_leitores):
+    assert client.get("/leitores").status_code == 401
+    body = client.get("/leitores", headers=auth_header).json()
+    assert body["leitores"] == {"bancada": "10.5.50.155", "lavanderia": "10.5.50.161"}
+    assert "password" not in str(body) and "\"a\"" not in str(body)
+
+
+def test_scheme_invalido_recusado():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, leitores={"x": {"host": "h", "scheme": "htps"}})
 
 
 def test_leitores_vem_do_env_em_json(monkeypatch):

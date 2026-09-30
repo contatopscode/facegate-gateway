@@ -20,7 +20,10 @@ async def require_token(
             detail="Missing Authorization header. Esperado: Bearer <token>",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if not secrets.compare_digest(credentials.credentials, settings.gateway_token):
+    # Em bytes: com str, token não-ASCII no header dá TypeError (500).
+    if not secrets.compare_digest(
+        credentials.credentials.encode(), settings.gateway_token.encode()
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token inválido.",

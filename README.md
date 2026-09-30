@@ -23,6 +23,7 @@ não alcança a rede local) e o terminal (que aceita só ISAPI local).
 | Método | Path | Descrição |
 |---|---|---|
 | `GET`  | `/health` | Health check (sem auth) |
+| `GET`  | `/leitores` | Terminais configurados (nome → IP, sem senha) |
 | `POST` | `/hikvision/cadastrar-face` | Cadastra face de um user (FDSetUp + PUT foto) |
 | `DELETE` | `/hikvision/face/{person_id}` | Remove face do terminal |
 | `GET`  | `/hikvision/status` | Sonda `deviceInfo` |

@@ -1,6 +1,7 @@
 """Config via env vars. Pydantic-settings valida na importação."""
 import re
 import secrets
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,7 +14,7 @@ class LeitorConfig(BaseModel):
 
     host: str
     port: int = 443
-    scheme: str = "https"
+    scheme: Literal["http", "https"] = "https"
     user: str = "admin"
     password: str = ""
     fdid: str = "1"
@@ -46,7 +47,7 @@ class Settings(BaseSettings):
     # o terminal só responde em http, `https` dá erro de conexão. Deixe
     # `https` como default (fábrica costuma expor os dois) e troque pra `http`
     # quando o terminal só atende em texto claro. Ver `hikvision_base_url`.
-    hikvision_scheme: str = "https"
+    hikvision_scheme: Literal["http", "https"] = "https"
     hikvision_user: str = "admin"
     hikvision_password: str = ""
     hikvision_fdid: str = "1"
