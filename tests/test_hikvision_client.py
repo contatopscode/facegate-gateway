@@ -115,3 +115,20 @@ def test_to_employee_no_nao_uuid_passa_intacto():
     from app.hikvision_client import to_employee_no
 
     assert to_employee_no("900001") == "900001"
+
+
+def test_parse_device_info_aceita_xml():
+    from app.hikvision_client import _parse_device_info
+
+    xml = ('<DeviceInfo version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">'
+           '<model>DS-K1T672MX</model><firmwareVersion>V3.18.0</firmwareVersion>'
+           '<serialNumber>FK9617582</serialNumber></DeviceInfo>')
+    info = _parse_device_info(xml)
+    assert info["model"] == "DS-K1T672MX"
+    assert info["firmwareVersion"] == "V3.18.0"
+
+
+def test_parse_device_info_aceita_json():
+    from app.hikvision_client import _parse_device_info
+
+    assert _parse_device_info('{"DeviceInfo":{"model":"X"}}') == {"model": "X"}

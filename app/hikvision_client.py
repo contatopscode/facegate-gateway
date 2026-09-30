@@ -43,6 +43,22 @@ def to_employee_no(person_id: str) -> str:
         return str(person_id)
 
 
+def _parse_device_info(body: str) -> dict:
+    """deviceInfo em JSON ou XML — o DS-K1T672MX fw 3.18 ignora ?format=json
+    e devolve XML (validado na loja, 2026-09-30)."""
+    try:
+        return json.loads(body).get("DeviceInfo", {})
+    except ValueError:
+        pass
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        return {}
+    return {el.tag.split("}")[-1]: (el.text or "") for el in root}
+
+
 class HikvisionClient:
     """Wrapper ISAPI minimal. Stateless — instancia por request."""
 
@@ -195,8 +211,7 @@ class HikvisionClient:
                 "GET", "/ISAPI/System/deviceInfo?format=json"
             )
             if sc == 200:
-                data = json.loads(body)
-                info = data.get("DeviceInfo", {})
+                info = _parse_device_info(body)
                 return {
                     "online": True,
                     "modelo": info.get("model", ""),
