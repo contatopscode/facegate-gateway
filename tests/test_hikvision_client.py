@@ -97,3 +97,21 @@ async def test_remover_face_usa_userinfo_delete():
     assert calls[0]["path"] == "/ISAPI/AccessControl/UserInfo/Delete?format=json"
     cond = calls[0]["kwargs"]["json"]["UserInfoDelCond"]["EmployeeNoList"]
     assert cond == [{"employeeNo": "uuid-abc"}]
+
+
+def test_to_employee_no_uuid_vira_hex_32():
+    from app.hikvision_client import to_employee_no
+    import uuid
+
+    u = "3f2b8c1e-9a7d-4e21-b5c4-0d1e2f3a4b5c"
+    emp = to_employee_no(u)
+    assert emp == "3f2b8c1e9a7d4e21b5c40d1e2f3a4b5c"
+    assert len(emp) == 32
+    # o webhook do FaceGate lê de volta com uuid.UUID(...)
+    assert str(uuid.UUID(emp)) == u
+
+
+def test_to_employee_no_nao_uuid_passa_intacto():
+    from app.hikvision_client import to_employee_no
+
+    assert to_employee_no("900001") == "900001"

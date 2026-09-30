@@ -16,6 +16,7 @@ Remoção: PUT /ISAPI/AccessControl/UserInfo/Delete?format=json (apaga usuário 
 """
 import json
 import logging
+import uuid
 from typing import Any
 
 import httpx
@@ -26,6 +27,20 @@ logger = logging.getLogger(__name__)
 _MAX_FOTO_BYTES = 5 * 1024 * 1024
 
 DEFAULT_TIMEOUT = httpx.Timeout(20.0, read=20.0)
+
+
+def to_employee_no(person_id: str) -> str:
+    """Converte o UUID do FaceGate no employeeNo do terminal.
+
+    O employeeNo da Hikvision aceita no máximo 32 caracteres; um UUID com
+    hífens tem 36. Usamos o formato hex (32 chars, sem hífens), que o
+    webhook do FaceGate lê de volta com `uuid.UUID(...)` sem mudança.
+    IDs que não são UUID (ex. "900001") passam intactos.
+    """
+    try:
+        return uuid.UUID(str(person_id)).hex
+    except ValueError:
+        return str(person_id)
 
 
 class HikvisionClient:
@@ -96,8 +111,8 @@ class HikvisionClient:
         if len(foto_bytes) > _MAX_FOTO_BYTES:
             return False, f"Foto excede {_MAX_FOTO_BYTES} bytes ({len(foto_bytes)})."
 
-        employee_no = person_id
-        nome = name or person_id
+        employee_no = to_employee_no(person_id)
+        nome = (name or person_id)[:32]
 
         # Passo 1: cria o usuário de controle de acesso.
         user_body = {
@@ -162,7 +177,7 @@ class HikvisionClient:
             sc, body = await self._request(
                 "PUT",
                 "/ISAPI/AccessControl/UserInfo/Delete?format=json",
-                json={"UserInfoDelCond": {"EmployeeNoList": [{"employeeNo": person_id}]}},
+                json={"UserInfoDelCond": {"EmployeeNoList": [{"employeeNo": to_employee_no(person_id)}]}},
                 headers={"Content-Type": "application/json"},
             )
         except httpx.HTTPError as exc:
