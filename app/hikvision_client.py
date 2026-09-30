@@ -3,22 +3,20 @@
 Baseado no `isapi_base.py` do FaceGate, mas sem dependência do SQLAlchemy
 ou do app.core. Esse módulo fala direto com o terminal via ISAPI.
 
-**Endpoints que o DS-K1T672MX firm 3.18 SUPORTA:**
-- `/ISAPI/Event/notification/httpHosts` (webhook) — funciona
-- `/ISAPI/Streaming/channels/101` (camera) — funciona
-- `/ISAPI/System/deviceInfo` — funciona
-- `/ISAPI/System/capabilities` — funciona
-- `/ISAPI/Intelligent/FDLib` (FDSetUp config) — funciona (com bug do 2 ids)
+**Sequência de cadastro VALIDADA no DS-K1T672MX firm 3.18 (loja real, 2026-09-30):**
+  1. POST /ISAPI/AccessControl/UserInfo/Record?format=json    (cria o usuário/employeeNo)
+  2. POST /ISAPI/Intelligent/FDLib/FaceDataRecord?format=json (multipart: parte JSON
+     {faceLibType, FDID, FPID=employeeNo} + parte img) — amarra a face ao usuário.
+Remoção: PUT /ISAPI/AccessControl/UserInfo/Delete?format=json (apaga usuário + face).
 
-**Endpoints que NÃO SUPORTA (404/405):**
-- `/ISAPI/Intelligent/FDLib/FDSetUp` — 404
-- `/ISAPI/Intelligent/FDLib/FDSetUp/FaceDataRecord` — 405
+**Endpoints que ESTE firmware NÃO suporta (404/405) — não usar:**
+- `/ISAPI/Intelligent/FDLib/FDSetUp` e `/FDSetUp/FaceDataRecord` — 404/405
 - `/ISAPI/ContentMgmt/InputProxy/channels/1/face` — 404
 - `/ISAPI/AccessControl/UserInfo/Search` — 404
-- `/ISAPI/AccessControl/RemoteControl/door/{n}` — 404
 """
 import json
 import logging
+import uuid
 from typing import Any
 
 import httpx
@@ -29,6 +27,36 @@ logger = logging.getLogger(__name__)
 _MAX_FOTO_BYTES = 5 * 1024 * 1024
 
 DEFAULT_TIMEOUT = httpx.Timeout(20.0, read=20.0)
+
+
+def to_employee_no(person_id: str) -> str:
+    """Converte o UUID do FaceGate no employeeNo do terminal.
+
+    O employeeNo da Hikvision aceita no máximo 32 caracteres; um UUID com
+    hífens tem 36. Usamos o formato hex (32 chars, sem hífens), que o
+    webhook do FaceGate lê de volta com `uuid.UUID(...)` sem mudança.
+    IDs que não são UUID (ex. "900001") passam intactos.
+    """
+    try:
+        return uuid.UUID(str(person_id)).hex
+    except ValueError:
+        return str(person_id)
+
+
+def _parse_device_info(body: str) -> dict:
+    """deviceInfo em JSON ou XML — o DS-K1T672MX fw 3.18 ignora ?format=json
+    e devolve XML (validado na loja, 2026-09-30)."""
+    try:
+        return json.loads(body).get("DeviceInfo", {})
+    except ValueError:
+        pass
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        return {}
+    return {el.tag.split("}")[-1]: (el.text or "") for el in root}
 
 
 class HikvisionClient:
@@ -73,88 +101,108 @@ class HikvisionClient:
 
     # ---------- Endpoints úteis ----------
 
+    @staticmethod
+    def _parse_status(body: str) -> tuple[bool, str, str]:
+        """Interpreta a resposta JSON da ISAPI. Retorna (ok, statusString, subStatusCode)."""
+        try:
+            data = json.loads(body)
+        except (ValueError, TypeError):
+            return False, body[:200], ""
+        status_string = str(data.get("statusString", ""))
+        sub = str(data.get("subStatusCode", ""))
+        ok = data.get("statusCode") == 1 or status_string.upper() == "OK"
+        return ok, status_string, sub
+
     async def cadastrar_face(
         self, person_id: str, foto_bytes: bytes, name: str | None = None
     ) -> tuple[bool, str]:
-        """Tenta cadastrar face. Retorna (sucesso, mensagem).
+        """Cadastra usuário + face no terminal. Retorna (sucesso, mensagem).
 
-        Em firmwares 3.x limitados (DS-K1T672MX), pode dar 404 no FDSetUp
-        e 405 no FaceDataRecord. A gente trata como falha e o caller decide
-        se vale tentar UI manual como fallback.
+        Sequência validada no DS-K1T672MX fw 3.18 (loja real, 2026-09-30):
+          1. POST UserInfo/Record  — cria o usuário de controle de acesso (employeeNo).
+          2. POST FaceDataRecord   — envia a foto e amarra ao employeeNo (FPID).
+        `person_id` (UUID do FaceGate) é usado como employeeNo/FPID, mantendo o
+        mapeamento com os eventos de acesso que voltam pelo webhook.
         """
         if len(foto_bytes) > _MAX_FOTO_BYTES:
             return False, f"Foto excede {_MAX_FOTO_BYTES} bytes ({len(foto_bytes)})."
 
-        # Passo 1: FDSetUp (cria/atualiza personID)
-        try:
-            fdsetup_body = {
-                "faceLibType": self._face_lib_type,
-                "FDID": self._fdid,
-                "faceURL": "",
-                "personID": person_id,
-            }
-            if name:
-                fdsetup_body["name"] = name
+        employee_no = to_employee_no(person_id)
+        nome = (name or person_id)[:32]
 
+        # Passo 1: cria o usuário de controle de acesso.
+        user_body = {
+            "UserInfo": {
+                "employeeNo": employee_no,
+                "name": nome,
+                "userType": "normal",
+                "Valid": {
+                    "enable": True,
+                    "beginTime": "2024-01-01T00:00:00",
+                    "endTime": "2037-12-31T23:59:59",
+                },
+                "doorRight": "1",
+                "RightPlan": [{"doorNo": 1, "planTemplateNo": "1"}],
+            }
+        }
+        try:
             sc, body = await self._request(
                 "POST",
-                "/ISAPI/Intelligent/FDLib/FDSetUp?format=json",
-                json=fdsetup_body,
+                "/ISAPI/AccessControl/UserInfo/Record?format=json",
+                json=user_body,
                 headers={"Content-Type": "application/json"},
             )
-            if sc not in (200, 201):
-                # 404/405 = firmware limitado
-                if sc in (404, 405):
-                    return False, f"Firmware não suporta FDSetUp (HTTP {sc})"
-                logger.warning("FDSetUp user=%s: HTTP %s — %s", person_id, sc, body[:200])
-                return False, f"FDSetUp falhou: HTTP {sc}"
-            logger.info("FDSetUp user=%s: OK", person_id)
         except httpx.HTTPError as exc:
-            return False, f"FDSetUp erro: {type(exc).__name__}: {exc}"
+            return False, f"UserInfo/Record erro: {type(exc).__name__}: {exc}"
 
-        # Passo 2: PUT da foto (multipart)
+        ok, status_string, sub = self._parse_status(body)
+        # employeeNoAlreadyExist é idempotente — seguimos pra (re)enviar a face.
+        if not ok and sub != "employeeNoAlreadyExist":
+            logger.warning("UserInfo/Record user=%s: HTTP %s — %s", person_id, sc, body[:200])
+            return False, f"UserInfo/Record falhou (HTTP {sc}): {status_string or sub}"
+        logger.info("UserInfo/Record user=%s: %s", person_id, status_string or sub or "OK")
+
+        # Passo 2: envia a face e amarra ao employeeNo via FaceDataRecord (multipart).
+        face_meta = {
+            "faceLibType": self._face_lib_type,
+            "FDID": self._fdid,
+            "FPID": employee_no,
+        }
         try:
-            metadata = {"FaceDataRecord": {"personID": person_id}}
-            if name:
-                metadata["FaceDataRecord"]["name"] = name
-
             sc, body = await self._request(
-                "PUT",
-                "/ISAPI/Intelligent/FDLib/FDSetUp/FaceDataRecord?format=json",
-                files={"faceImage": ("face.jpg", foto_bytes, "image/jpeg")},
-                data={
-                    "FDID": self._fdid,
-                    "faceLibType": self._face_lib_type,
-                    "FaceDataRecord": json.dumps(metadata),
+                "POST",
+                "/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json",
+                files={
+                    "FaceDataRecord": (None, json.dumps(face_meta), "application/json"),
+                    "img": ("face.jpg", foto_bytes, "image/jpeg"),
                 },
             )
-            if sc not in (200, 201):
-                if sc in (404, 405):
-                    return False, f"Firmware não suporta upload de foto (HTTP {sc})"
-                logger.warning("PUT foto user=%s: HTTP %s — %s", person_id, sc, body[:200])
-                return False, f"PUT foto falhou: HTTP {sc}"
-            logger.info("PUT foto user=%s: OK", person_id)
-            return True, "ok"
         except httpx.HTTPError as exc:
-            return False, f"PUT foto erro: {type(exc).__name__}: {exc}"
+            return False, f"FaceDataRecord erro: {type(exc).__name__}: {exc}"
+
+        ok, status_string, sub = self._parse_status(body)
+        if not ok:
+            logger.warning("FaceDataRecord user=%s: HTTP %s — %s", person_id, sc, body[:200])
+            return False, f"FaceDataRecord falhou (HTTP {sc}): {status_string or sub}"
+        logger.info("FaceDataRecord user=%s: OK", person_id)
+        return True, "ok"
 
     async def remover_face(self, person_id: str) -> tuple[bool, str]:
+        """Remove o usuário (e a face junto) via UserInfo/Delete. Idempotente."""
         try:
             sc, body = await self._request(
-                "DELETE",
-                "/ISAPI/Intelligent/FDLib/FDSetUp/FaceDataRecord",
-                params={
-                    "FDID": self._fdid,
-                    "faceLibType": self._face_lib_type,
-                    "personID": person_id,
-                    "format": "json",
-                },
+                "PUT",
+                "/ISAPI/AccessControl/UserInfo/Delete?format=json",
+                json={"UserInfoDelCond": {"EmployeeNoList": [{"employeeNo": to_employee_no(person_id)}]}},
+                headers={"Content-Type": "application/json"},
             )
-            if sc in (200, 204, 404):  # 404 = já não existia, idempotente
-                return True, "ok"
-            return False, f"DELETE falhou: HTTP {sc}"
         except httpx.HTTPError as exc:
-            return False, f"DELETE erro: {type(exc).__name__}: {exc}"
+            return False, f"UserInfo/Delete erro: {type(exc).__name__}: {exc}"
+
+        ok, status_string, sub = self._parse_status(body)
+        if ok or sc == 404:  # 404 = já não existia, idempotente
+            return True, "ok"
+        return False, f"UserInfo/Delete falhou (HTTP {sc}): {status_string or sub}"
 
     async def status(self) -> dict:
         """Sonda `deviceInfo`. Retorna dict com modelo, firmware, online status."""
@@ -163,8 +211,7 @@ class HikvisionClient:
                 "GET", "/ISAPI/System/deviceInfo?format=json"
             )
             if sc == 200:
-                data = json.loads(body)
-                info = data.get("DeviceInfo", {})
+                info = _parse_device_info(body)
                 return {
                     "online": True,
                     "modelo": info.get("model", ""),
