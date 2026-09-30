@@ -105,11 +105,16 @@ if (Test-Path (Join-Path $InstallDir ".git")) {
     if ((Test-Path $InstallDir) -and (Get-ChildItem -Force $InstallDir | Select-Object -First 1)) {
         throw "$InstallDir já existe e não é um clone do gateway. Confira quem criou e remova antes."
     }
-    # Trava a pasta pai antes do clone, para ninguém criar $InstallDir com a própria ACL.
+    # Trava a pasta pai só se este script a criou (ex.: C:\FaceGate). Se ela já existia
+    # (C:\, D:\Apps...), mexer na ACL dela quebraria a máquina; aí a proteção é o abort
+    # acima + /setowner e /inheritance:r no próprio $InstallDir.
     $Parent = Split-Path $InstallDir
+    $criouParent = -not (Test-Path $Parent)
     New-Item -ItemType Directory -Force -Path $Parent | Out-Null
-    icacls $Parent /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" /Q | Out-Null
-    Assert-Exit "icacls $Parent"
+    if ($criouParent) {
+        icacls $Parent /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" /Q | Out-Null
+        Assert-Exit "icacls $Parent"
+    }
     git clone $RepoUrl $InstallDir
     Assert-Exit "git clone"
 }
