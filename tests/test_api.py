@@ -57,3 +57,8 @@ def test_token_errado_401(client, fake_jpeg_b64):
         json={"person_id": "abc", "foto_base64": fake_jpeg_b64},
     )
     assert r.status_code == 401
+
+
+def test_token_nao_ascii_401_nao_500(client):
+    r = client.get("/hikvision/status", headers={"Authorization": "Bearer tökén".encode()})
+    assert r.status_code == 401

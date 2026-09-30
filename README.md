@@ -23,12 +23,22 @@ não alcança a rede local) e o terminal (que aceita só ISAPI local).
 | Método | Path | Descrição |
 |---|---|---|
 | `GET`  | `/health` | Health check (sem auth) |
+| `GET`  | `/leitores` | Terminais configurados (nome → IP, sem senha) |
 | `POST` | `/hikvision/cadastrar-face` | Cadastra face de um user (FDSetUp + PUT foto) |
 | `DELETE` | `/hikvision/face/{person_id}` | Remove face do terminal |
 | `GET`  | `/hikvision/status` | Sonda `deviceInfo` |
 | `POST` | `/hikvision/abrir-porta` | Pulso no relé |
 
 Todos (exceto `/health`) requerem header `Authorization: Bearer <GATEWAY_TOKEN>`.
+
+### Vários leitores num gateway só
+
+Com `LEITORES` no `.env` (JSON, ver `.env.example`), as mesmas rotas existem em
+`/leitores/<nome>/hikvision/...` — ex. `GET /leitores/lavanderia/hikvision/status`.
+No FaceGate, cada device aponta pro seu leitor com
+`gateway_url = https://<túnel>/leitores/<nome>` e o mesmo `GATEWAY_TOKEN`; o backend
+não muda. Leitor não configurado → 404. As rotas `/hikvision/...` sem nome seguem
+falando com o terminal das vars `HIKVISION_*`.
 
 ## Setup rápido (Linux/Raspberry)
 
@@ -90,6 +100,7 @@ Pra URL fixa (recomendado), criar tunnel nomeado com `cloudflared tunnel login` 
 | `HIKVISION_PASSWORD` | (obrigatório) | Senha ISAPI |
 | `HIKVISION_FDID` | `1` | Face Database ID (default `1`) |
 | `HIKVISION_FACE_LIB_TYPE` | `blackFD` | Tipo da lib (`blackFD` = quem tem acesso) |
+| `LEITORES` | `{}` | JSON com vários terminais (`{"<nome>": {"host": ..., "port": ..., "scheme": ..., "user": ..., "password": ...}}`), um por rota `/leitores/<nome>` |
 | `LOG_LEVEL` | `INFO` | DEBUG/INFO/WARNING/ERROR |
 
 ## Arquitetura
