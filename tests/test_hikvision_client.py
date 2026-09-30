@@ -72,6 +72,98 @@ async def test_cadastrar_face_idempotente_quando_user_ja_existe():
     assert calls[-1]["path"] == "/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json"
 
 
+_ALREADY = '{"statusCode":6,"statusString":"Invalid Operation","subStatusCode":"employeeNoAlreadyExist"}'
+
+
+@pytest.mark.asyncio
+async def test_user_existente_atualiza_nome_com_modify_antes_da_face():
+    calls: list[dict] = []
+
+    def responder(method, path, **kwargs):
+        if "UserInfo/Record" in path:
+            return (400, _ALREADY)
+        return (200, _OK)
+
+    client = _make_client(calls, responder)
+    ok, msg = await client.cadastrar_face("uuid-abc", b"\xff\xd8jpeg", name="Paulo Siqueira")
+
+    assert ok is True and msg == "ok"
+    paths = [c["path"] for c in calls]
+    assert paths == [
+        "/ISAPI/AccessControl/UserInfo/Record?format=json",
+        "/ISAPI/AccessControl/UserInfo/Modify?format=json",
+        "/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json",
+    ]
+    assert calls[1]["method"] == "PUT"
+    user = calls[1]["kwargs"]["json"]["UserInfo"]
+    assert user["employeeNo"] == "uuid-abc"
+    assert user["name"] == "Paulo Siqueira"
+
+
+@pytest.mark.asyncio
+async def test_modify_falhando_nao_impede_a_face():
+    calls: list[dict] = []
+    erro = '{"statusCode":4,"statusString":"Invalid Content","subStatusCode":"badParameters"}'
+
+    def responder(method, path, **kwargs):
+        if "UserInfo/Record" in path:
+            return (400, _ALREADY)
+        if "UserInfo/Modify" in path:
+            return (400, erro)
+        return (200, _OK)
+
+    client = _make_client(calls, responder)
+    ok, msg = await client.cadastrar_face("uuid-abc", b"\xff\xd8jpeg", name="Fulano")
+
+    assert ok is True and msg == "ok"
+    assert calls[-1]["path"] == "/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json"
+
+
+@pytest.mark.asyncio
+async def test_modify_com_erro_de_rede_nao_impede_a_face():
+    import httpx
+
+    calls: list[dict] = []
+    client = HikvisionClient(base_url="http://fake-hik:80", username="admin", password="x")
+
+    async def _fake_request(method, path, **kwargs):
+        calls.append({"method": method, "path": path, "kwargs": kwargs})
+        if "UserInfo/Record" in path:
+            return (400, _ALREADY)
+        if "UserInfo/Modify" in path:
+            raise httpx.ConnectError("boom")
+        return (200, _OK)
+
+    client._request = _fake_request  # type: ignore[assignment]
+    ok, _ = await client.cadastrar_face("uuid-abc", b"\xff\xd8jpeg", name="Fulano")
+
+    assert ok is True
+    assert calls[-1]["path"] == "/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json"
+
+
+@pytest.mark.asyncio
+async def test_user_novo_nao_chama_modify():
+    calls: list[dict] = []
+    client = _make_client(calls, lambda *a, **k: (200, _OK))
+
+    await client.cadastrar_face("uuid-abc", b"\xff\xd8jpeg", name="Fulano")
+
+    assert not any("Modify" in c["path"] for c in calls)
+
+
+def test_cortar_nome_por_bytes_sem_partir_utf8():
+    from app.hikvision_client import _cortar_nome
+
+    assert _cortar_nome("Fulano") == "Fulano"
+    # 31 ASCII + "ã" (2 bytes) = 33 bytes: o "ã" não cabe inteiro e sai
+    nome = "a" * 31 + "ã"
+    cortado = _cortar_nome(nome)
+    assert cortado == "a" * 31
+    assert len(cortado.encode("utf-8")) <= 32
+    # só acentos: 16 x "é" = 32 bytes exatos
+    assert _cortar_nome("é" * 20) == "é" * 16
+
+
 @pytest.mark.asyncio
 async def test_cadastrar_face_falha_de_verdade_aborta():
     calls: list[dict] = []

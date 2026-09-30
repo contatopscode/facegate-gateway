@@ -43,6 +43,15 @@ def to_employee_no(person_id: str) -> str:
         return str(person_id)
 
 
+_MAX_NOME_BYTES = 32
+
+
+def _cortar_nome(nome: str) -> str:
+    """Corta o nome em 32 bytes UTF-8 (limite do terminal) sem partir um
+    caractere multibyte no meio."""
+    return nome.encode("utf-8")[:_MAX_NOME_BYTES].decode("utf-8", "ignore")
+
+
 def _parse_device_info(body: str) -> dict:
     """deviceInfo em JSON ou XML — o DS-K1T672MX fw 3.18 ignora ?format=json
     e devolve XML (validado na loja, 2026-09-30)."""
@@ -128,7 +137,7 @@ class HikvisionClient:
             return False, f"Foto excede {_MAX_FOTO_BYTES} bytes ({len(foto_bytes)})."
 
         employee_no = to_employee_no(person_id)
-        nome = (name or person_id)[:32]
+        nome = _cortar_nome(name or person_id)
 
         # Passo 1: cria o usuário de controle de acesso.
         user_body = {
@@ -156,11 +165,15 @@ class HikvisionClient:
             return False, f"UserInfo/Record erro: {type(exc).__name__}: {exc}"
 
         ok, status_string, sub = self._parse_status(body)
-        # employeeNoAlreadyExist é idempotente — seguimos pra (re)enviar a face.
         if not ok and sub != "employeeNoAlreadyExist":
             logger.warning("UserInfo/Record user=%s: HTTP %s — %s", person_id, sc, body[:200])
             return False, f"UserInfo/Record falhou (HTTP {sc}): {status_string or sub}"
         logger.info("UserInfo/Record user=%s: %s", person_id, status_string or sub or "OK")
+
+        # Usuário já existe: atualiza nome/validade com UserInfo/Modify (senão o
+        # terminal mantém o nome antigo, ex. o UUID). Falha aqui não bloqueia a face.
+        if sub == "employeeNoAlreadyExist":
+            await self._modificar_usuario(person_id, user_body)
 
         # Passo 2: envia a face e amarra ao employeeNo via FaceDataRecord (multipart).
         face_meta = {
@@ -186,6 +199,25 @@ class HikvisionClient:
             return False, f"FaceDataRecord falhou (HTTP {sc}): {status_string or sub}"
         logger.info("FaceDataRecord user=%s: OK", person_id)
         return True, "ok"
+
+    async def _modificar_usuario(self, person_id: str, user_body: dict) -> None:
+        """PUT UserInfo/Modify. Só loga em caso de falha — nome desatualizado
+        não pode impedir o envio da face (e a porta de abrir)."""
+        try:
+            sc, body = await self._request(
+                "PUT",
+                "/ISAPI/AccessControl/UserInfo/Modify?format=json",
+                json=user_body,
+                headers={"Content-Type": "application/json"},
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("UserInfo/Modify user=%s erro: %s: %s", person_id, type(exc).__name__, exc)
+            return
+        ok, status_string, sub = self._parse_status(body)
+        if ok:
+            logger.info("UserInfo/Modify user=%s: OK", person_id)
+        else:
+            logger.warning("UserInfo/Modify user=%s: HTTP %s — %s", person_id, sc, body[:200])
 
     async def remover_face(self, person_id: str) -> tuple[bool, str]:
         """Remove o usuário (e a face junto) via UserInfo/Delete. Idempotente."""
