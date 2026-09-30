@@ -102,7 +102,14 @@ if (Test-Path (Join-Path $InstallDir ".git")) {
     Assert-Exit "git fetch"
 } else {
     Write-Host "==> Clonando em $InstallDir" -ForegroundColor Cyan
-    New-Item -ItemType Directory -Force -Path (Split-Path $InstallDir) | Out-Null
+    if ((Test-Path $InstallDir) -and (Get-ChildItem -Force $InstallDir | Select-Object -First 1)) {
+        throw "$InstallDir já existe e não é um clone do gateway. Confira quem criou e remova antes."
+    }
+    # Trava a pasta pai antes do clone, para ninguém criar $InstallDir com a própria ACL.
+    $Parent = Split-Path $InstallDir
+    New-Item -ItemType Directory -Force -Path $Parent | Out-Null
+    icacls $Parent /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" /Q | Out-Null
+    Assert-Exit "icacls $Parent"
     git clone $RepoUrl $InstallDir
     Assert-Exit "git clone"
 }
@@ -115,6 +122,8 @@ Write-Host "==> Código em $(git @G rev-parse --short HEAD)" -ForegroundColor Cy
 
 # --- Permissões: o serviço roda como SYSTEM, então ninguém além de SYSTEM e
 #     Administrators pode escrever no código, no venv ou no .env. ---
+icacls $InstallDir /setowner "Administrators" /T /Q | Out-Null
+Assert-Exit "icacls /setowner $InstallDir"
 icacls $InstallDir /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" /T /Q | Out-Null
 Assert-Exit "icacls $InstallDir"
 
@@ -169,8 +178,9 @@ Assert-Exit "nssm start"
 if (-not $TunnelToken) { $TunnelToken = $env:FACEGATE_TUNNEL_TOKEN }
 if (-not $TunnelToken) {
     $sec = Read-Host "Token do conector do túnel (Enter para pular)" -AsSecureString
-    $TunnelToken = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
+    try { $TunnelToken = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 }
 if ($TunnelToken) {
     Write-Host "==> Instalando o serviço do cloudflared" -ForegroundColor Cyan
