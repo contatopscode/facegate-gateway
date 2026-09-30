@@ -51,7 +51,7 @@ Num PowerShell **como administrador**:
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 irm https://raw.githubusercontent.com/contatopscode/facegate-gateway/main/scripts/windows/install.ps1 -OutFile install.ps1
-.\install.ps1 -TunnelToken "<token do conector, enviado pelo DevOps>"
+.\install.ps1 -Ref <sha revisado>   # pede o token do túnel sem ecoar na tela
 ```
 
 O script ([`scripts/windows/install.ps1`](scripts/windows/install.ps1)) instala Python/Git/NSSM/cloudflared
@@ -60,6 +60,8 @@ dois serviços que sobem no boot e reiniciam se caírem:
 
 - `FaceGateGateway`: uvicorn em `127.0.0.1:8000` (só local; o acesso externo é pelo túnel). Log em `C:\FaceGate\gateway\logs\gateway.log`.
 - `cloudflared`: conector do túnel nomeado (URL fixa, não muda a cada reinício).
+
+O token do túnel **não** vai na linha de comando (ficaria no histórico do PowerShell): o script pede sem eco, ou lê `FACEGATE_TUNNEL_TOKEN`. A pasta fica gravável só por SYSTEM e Administrators, porque o serviço roda como SYSTEM.
 
 Para atualizar o código, rode o mesmo comando de novo (o `.env` existente é preservado).
 
