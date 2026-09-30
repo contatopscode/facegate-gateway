@@ -44,6 +44,27 @@ python -m app.main
 
 ## Setup (Windows)
 
+### Máquina fixa (recomendado): instalador como serviço
+
+Num PowerShell **como administrador**:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+irm https://raw.githubusercontent.com/contatopscode/facegate-gateway/main/scripts/windows/install.ps1 -OutFile install.ps1
+.\install.ps1 -TunnelToken "<token do conector, enviado pelo DevOps>"
+```
+
+O script ([`scripts/windows/install.ps1`](scripts/windows/install.ps1)) instala Python/Git/NSSM/cloudflared
+via winget, cria o venv em `C:\FaceGate\gateway`, abre o `.env` no Notepad na primeira vez e registra
+dois serviços que sobem no boot e reiniciam se caírem:
+
+- `FaceGateGateway`: uvicorn em `127.0.0.1:8000` (só local; o acesso externo é pelo túnel). Log em `C:\FaceGate\gateway\logs\gateway.log`.
+- `cloudflared`: conector do túnel nomeado (URL fixa, não muda a cada reinício).
+
+Para atualizar o código, rode o mesmo comando de novo (o `.env` existente é preservado).
+
+### Manual (teste rápido)
+
 ```bat
 git clone https://github.com/contatopscode/facegate-gateway.git
 cd facegate-gateway
