@@ -69,6 +69,77 @@ async def health() -> dict:
     }
 
 
+@app.get("/api/devices/_health")
+async def devices_health() -> dict:
+    """Status agregado de cada leitor configurado (sem auth).
+
+    Diagnóstico remoto: bate do notebook/telefone em
+    `https://gw-predio.pscode.ia.br/api/devices/_health` e vê se cada
+    leitor (o padrão + os do `LEITORES`) está respondendo — sem precisar
+    entrar na máquina Windows nem expor token pela internet.
+
+    Sem auth (igual `/health`): o que se expõe aqui é só `host` + status
+    booleano/mensagem de erro. NÃO retorna `user`, `password`, `token`,
+    nem nada que credencie um atacante. O túnel protege IPs atrás do
+    Cloudflare; isto só precisa rodar quando o túnel está configurado.
+
+    `gateway` no payload é o indicador geral ("ok" = processo respondendo).
+    Adicionado no incidente PSCODE-FG-FSW-2026-015 pra Paulo não precisar
+    abrir AnyDesk só pra conferir se o .161 caiu.
+    """
+    leitores_status: dict[str, dict] = {}
+    for nome, cfg in sorted(settings.leitores.items()):
+        client = _client_de(cfg)
+        try:
+            info = await client.status()
+            leitores_status[nome] = {
+                "host": cfg.host,
+                "online": info.get("online", False),
+                "modelo": info.get("modelo", ""),
+                "firmware": info.get("firmware", ""),
+            }
+            if "erro" in info:
+                leitores_status[nome]["erro"] = info["erro"]
+        except Exception as exc:  # noqa: BLE001 — diagnóstico precisa agregar
+            leitores_status[nome] = {
+                "host": cfg.host,
+                "online": False,
+                "erro": f"{type(exc).__name__}: {exc}",
+            }
+
+    padrao_client = _client_padrao()
+    try:
+        padrao_info = await padrao_client.status()
+        padrao_status: dict = {
+            "host": settings.hikvision_host,
+            "online": padrao_info.get("online", False),
+            "modelo": padrao_info.get("modelo", ""),
+            "firmware": padrao_info.get("firmware", ""),
+        }
+        if "erro" in padrao_info:
+            padrao_status["erro"] = padrao_info["erro"]
+    except Exception as exc:  # noqa: BLE001
+        padrao_status = {
+            "host": settings.hikvision_host,
+            "online": False,
+            "erro": f"{type(exc).__name__}: {exc}",
+        }
+
+    # Sanidade: NUNCA expor credenciais, mesmo por bug. Se alguém mudar o
+    # cliente e devolver um dict com segredos, o endpoint remove.
+    for d in (padrao_status, *leitores_status.values()):
+        for k in list(d.keys()):
+            if k in {"user", "password", "username", "token", "auth"}:
+                d.pop(k, None)
+
+    return {
+        "gateway": "ok",
+        "version": app.version,
+        "padrao": padrao_status,
+        "leitores": leitores_status,
+    }
+
+
 # ---------- Diagnóstico (com token) ----------
 
 
