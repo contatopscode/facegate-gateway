@@ -8,6 +8,26 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _NOME_LEITOR = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
+# Tokens "placeholder" que aparecem no .env.example e em templates online.
+# Se o gateway subir com qualquer um desses, está rodando sem autenticação
+# real — qualquer um que tenha lido o README consegue falar com ele.
+# Visto em produção em 2026-10-06 no incidente PSCODE-FG-FSW-2026-015:
+# o .env na .188 veio do .env.example sem edição, e o gateway ficou
+# aceitava Bearer troque-por-um-token-aleatorio-32-chars (HTTP 200).
+PLACEHOLDER_TOKENS = frozenset(
+    {
+        "troque-por-um-token-aleatorio-32-chars",
+        "changeme",
+        "changeme-please",
+        "example",
+        "your-token-here",
+    }
+)
+# Mínimo razoável: token_urlsafe(32) gera ~43 chars. Aceitamos >= 24 pra
+# não quebrar tokens legacy de migração, mas abaixo disso é placeholder
+# quase certo.
+_MIN_TOKEN_LEN = 24
+
 
 class LeitorConfig(BaseModel):
     """Um terminal da LAN. Defaults iguais aos das vars `HIKVISION_*`."""
@@ -35,8 +55,16 @@ class Settings(BaseSettings):
 
     # --- Auth ---
     gateway_token: str = Field(
+        # Default só pra import não quebrar em dev/test (Settings() sem .env).
+        # Em produção SEM .env, gera um token aleatório (não é placeholder
+        # público, mas o operador precisa ver o log pra saber o que é — o
+        # ideal é sempre editar o .env). O validator abaixo rejeita
+        # placeholder/curto vindo do .env.example não editado.
         default_factory=lambda: secrets.token_urlsafe(32),
-        description="Token compartilhado com o FaceGate (header Authorization: Bearer)",
+        description=(
+            "Token compartilhado com o FaceGate (header Authorization: "
+            "Bearer ***). Edite o .env — não suba com placeholder."
+        ),
     )
 
     # --- Terminal ---
@@ -64,6 +92,33 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "INFO"
+
+    @field_validator("gateway_token")
+    @classmethod
+    def _token_nao_placeholder(cls, v: str) -> str:
+        """Falha rápido se o token for placeholder, vazio ou curto demais.
+
+        O .env.example usa `troque-por-um-token-aleatorio-32-chars` como
+        placeholder. Sem essa validação, o gateway sobe silenciosamente com
+        esse valor e qualquer pessoa que tenha lido o README consegue
+        falar com ele. Visto em PSCODE-FG-FSW-2026-015.
+        """
+        if not v or not v.strip():
+            raise ValueError(
+                "GATEWAY_TOKEN está vazio. Edite o .env do gateway "
+                "(em C:\\FaceGate\\gateway\\.env no Windows) e defina "
+                "o token compartilhado com o backend FaceGate. "
+                "Gere um novo: python3 -c 'import secrets; print(secrets.token_urlsafe(32))'"
+            )
+        token = v.strip()
+        if token in PLACEHOLDER_TOKENS or len(token) < _MIN_TOKEN_LEN:
+            raise ValueError(
+                f"GATEWAY_TOKEN={token!r} parece placeholder ou é curto demais "
+                f"(mínimo {_MIN_TOKEN_LEN} chars). Edite o .env e troque pelo "
+                "token real. O mesmo valor precisa estar configurado no "
+                "backend FaceGate."
+            )
+        return token
 
     @field_validator("leitores")
     @classmethod
