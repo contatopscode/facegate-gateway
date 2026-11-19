@@ -4,7 +4,7 @@ Agente local que fica na **rede do cliente** (mesma rede dos terminais Hikvision
 e traduz as chamadas REST/HTTPS do **FaceGate backend** (na VPS) pra ISAPI dos equipamentos.
 
 ```
-[FaceGate backend - VPS]                [Cliente - lavanderia]
+[FaceGate backend - VPS]                [Cliente - rede local]
 +---------------------+                 +----------------------+
 |                     |   HTTPS + token |   Gateway            |
 |   Driver Gateway →  | ───────────────→|   (Python/FastAPI)   |
@@ -34,7 +34,7 @@ Todos (exceto `/health`) requerem header `Authorization: Bearer <GATEWAY_TOKEN>`
 ### Vários leitores num gateway só
 
 Com `LEITORES` no `.env` (JSON, ver `.env.example`), as mesmas rotas existem em
-`/leitores/<nome>/hikvision/...` — ex. `GET /leitores/lavanderia/hikvision/status`.
+`/leitores/<nome>/hikvision/...` — ex. `GET /leitores/portaria/hikvision/status`.
 No FaceGate, cada device aponta pro seu leitor com
 `gateway_url = https://<túnel>/leitores/<nome>` e o mesmo `GATEWAY_TOKEN`; o backend
 não muda. Leitor não configurado → 404. As rotas `/hikvision/...` sem nome seguem
@@ -116,7 +116,7 @@ Pra URL fixa (recomendado), criar tunnel nomeado com `cloudflared tunnel login` 
 | Var | Default | Descrição |
 |---|---|---|
 | `GATEWAY_TOKEN` | (obrigatório) | Token compartilhado com o FaceGate (via header Bearer) |
-| `HIKVISION_HOST` | (obrigatório) | IP do terminal (ex: `10.5.50.161`) |
+| `HIKVISION_HOST` | (obrigatório) | IP do terminal (ex: `192.168.1.50`) |
 | `HIKVISION_PORT` | `443` | Porta ISAPI do terminal |
 | `HIKVISION_SCHEME` | `https` | `https` ou `http`. Use `http` (com `HIKVISION_PORT=80`) quando o terminal só atende em texto claro — comum em DS-K1T3xx/6xx de fábrica |
 | `HIKVISION_USER` | `admin` | Usuário ISAPI |
