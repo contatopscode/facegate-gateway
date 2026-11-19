@@ -133,6 +133,16 @@ Pra URL fixa (recomendado), criar tunnel nomeado com `cloudflared tunnel login` 
 - **Log:** stdout em JSON (coletado por journalctl ou Docker logs)
 - **Auto-restart:** systemd (Linux) / Docker restart policy / NSSM (Windows)
 
+## Decisões de projeto
+
+- **Agente local em vez de abrir a rede do cliente:** o backend na nuvem não alcança a LAN do terminal. O gateway roda dentro da rede e expõe só uma API HTTPS autenticada.
+- **Sem porta aberta:** o serviço escuta em 127.0.0.1 e o acesso externo passa por um túnel nomeado (Cloudflare Tunnel).
+- **Autenticação por token Bearer** em todas as rotas, exceto /health. O token nunca vai na linha de comando; o instalador do Windows pede sem eco.
+- **Stateless:** configuração por variáveis de ambiente e fotos processadas em memória, sem banco local. Isso facilita trocar a máquina ou reiniciar.
+- **Vários terminais em um gateway:** rotas /leitores/nome/... isolam cada equipamento sem mudar o contrato com o backend.
+- **Testável sem hardware:** um terminal falso em processo simula a ISAPI da Hikvision, os testes rodam com pytest.
+- **Resiliência:** reinício automático por systemd, Docker ou NSSM, e log estruturado em JSON.
+
 ## Testes
 
 ```bash
